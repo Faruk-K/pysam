@@ -1791,10 +1791,10 @@ cdef class AlignedSegment:
 
             ret = {}
             src = self._delegate
-            
-            if bam_parse_basemod(src, m) < 0:        
+
+            if bam_parse_basemod(src, m) < 0:
                 return None
-            
+
             n = bam_next_basemod(src, m, mods, 5, &pos)
 
             while n>0:
@@ -1803,11 +1803,11 @@ cdef class AlignedSegment:
                     mod_strand = mods[i].strand
                     if self.is_reverse:
                         mod_strand = 1 - mod_strand
-                    key = (chr(mods[i].canonical_base), 
+                    key = (chr(mods[i].canonical_base),
                             mod_strand,
                             mod_code )
                     ret.setdefault(key,[]).append((pos,mods[i].qual))
-                    
+
                 n = bam_next_basemod(src, m, mods, 5, &pos)
 
             if n<0:
@@ -1825,7 +1825,7 @@ cdef class AlignedSegment:
         """
         def __get__(self):
             pmods = self.modified_bases
-            if pmods and self.is_reverse:                
+            if pmods and self.is_reverse:
                 rmod = {}
 
                 # Try to find the length of the original sequence
@@ -1834,18 +1834,18 @@ cdef class AlignedSegment:
                     return rmod
                 else:
                     rlen = len(self.query_sequence)
-                    
+
                 for k,mods in pmods.items():
                     nk = k[0],1 - k[1],k[2]
                     for i in range(len(mods)):
-                        
+
                         mods[i] = (rlen - 1 -mods[i][0], mods[i][1])
                     rmod[nk] = mods
                 return rmod
-            
+
             return pmods
 
- 
+
     property query_alignment_length:
         """length of the aligned query sequence.
 
@@ -2053,6 +2053,121 @@ cdef class AlignedSegment:
                             qpos += 1
                 else:
                     qpos += l
+
+            elif op == BAM_CDEL:
+                if not _matches_only:
+                    if _with_seq:
+                        for i from pos <= i < pos + l:
+                            result.append((None, i, ref_seq[r_idx]))
+                            r_idx += 1
+                    else:
+                        for i from pos <= i < pos + l:
+                            result.append((None, i))
+                else:
+                    r_idx += l
+                pos += l
+
+            elif op == BAM_CHARD_CLIP:
+                pass # advances neither
+
+            elif op == BAM_CREF_SKIP:
+                if not _matches_only:
+                    if _with_seq:
+                        for i from pos <= i < pos + l:
+                            result.append((None, i, None))
+                    else:
+                        for i from pos <= i < pos + l:
+                            result.append((None, i))
+
+                pos += l
+
+        return result
+
+
+    def get_aligned_template(self, matches_only=False, with_seq=False):
+        """a list of aligned read (query) and reference positions.
+
+        For inserts, deletions, skipping either query or reference
+        position may be None.
+
+        For padding in the reference, the reference position will
+        always be None.
+
+        Parameters
+        ----------
+
+        matches_only : bool
+          If True, only matched bases are returned - no None on either
+          side.
+        with_seq : bool
+          If True, return a third element in the tuple containing the
+          reference sequence. For CIGAR 'P' (padding in the reference)
+          operations, the third tuple element will be None. Substitutions
+          are lower-case. This option requires an MD tag to be present.
+
+        Returns
+        -------
+
+        aligned_pairs : list of tuples
+
+        """
+        cdef uint32_t k, i, pos, qpos, r_idx, l
+        cdef int op
+        cdef uint32_t * cigar_p
+        cdef bam1_t * src = self._delegate
+        cdef int32_t t_len = self.template_length
+        cdef uint32_t flag = self.flag
+        cdef bint _matches_only = bool(matches_only)
+        cdef bint _with_seq = bool(with_seq)
+
+        # TODO: this method performs no checking and assumes that
+        # read sequence, cigar and MD tag are consistent.
+        if _with_seq:
+            # force_str required for py2/py3 compatibility
+            ref_seq = force_str(build_reference_sequence(src))
+            if ref_seq is None:
+                raise ValueError("MD tag not present")
+
+        r_idx = 0
+        if pysam_get_n_cigar(src) == 0:
+            return []
+
+        result = []
+        pos = src.core.pos
+
+
+        qpos = 0
+        cigar_p = pysam_bam_get_cigar(src)
+        for k from 0 <= k < pysam_get_n_cigar(src):
+            op = cigar_p[k] & BAM_CIGAR_MASK
+            l = cigar_p[k] >> BAM_CIGAR_SHIFT
+
+
+            if (op == BAM_CMATCH or op == BAM_CEQUAL or op == BAM_CDIFF) and t_len > 0 and abs(t_len) < 1000:
+                if _with_seq:
+                    for i from pos <= i < pos + l:
+                        result.append((qpos, i, ref_seq[r_idx]))
+                        r_idx += 1
+                        qpos += 1
+                else:
+                    t_len = abs(t_len)
+                    for i from pos <= i < pos + t_len:
+                        result.append((qpos, i))
+                        qpos += 1
+                pos += t_len
+
+            elif op == BAM_CINS or op == BAM_CSOFT_CLIP or op == BAM_CPAD:
+                if not _matches_only:
+                    if _with_seq:
+                        for i from pos <= i < pos + l:
+                            result.append((qpos, None, None))
+                            qpos += 1
+                    else:
+                        for i from pos <= i < pos + l:
+                            result.append((qpos, None))
+                            qpos += 1
+                else:
+                    qpos += t_len
 
             elif op == BAM_CDEL:
                 if not _matches_only:

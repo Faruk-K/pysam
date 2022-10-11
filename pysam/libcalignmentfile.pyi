@@ -154,6 +154,21 @@ class AlignmentFile(HTSFile):
         read_callback: Union[str, Callable[[AlignedSegment], bool]] = ...,
         reference: Optional[str] = ...,
         end: Optional[int] = ...,
+        gc_corr: Optional[bool] = ...,
+    ) -> Tuple[array.array, array.array, array.array, array.array]: ...
+    def count_fragments(
+        self,
+        contig: Optional[str] = ...,
+        frag_low: Optional[int] = ...,
+        frag_high: Optional[int] = ...,
+        start: Optional[int] = ...,
+        stop: Optional[int] = ...,
+        region: Optional[str] = ...,
+        quality_threshold: int = ...,
+        read_callback: Union[str, Callable[[AlignedSegment], bool]] = ...,
+        reference: Optional[str] = ...,
+        end: Optional[int] = ...,
+        gc_corr: Optional[bool] = ...,
     ) -> Tuple[array.array, array.array, array.array, array.array]: ...
     def find_introns_slow(
         self, read_iterator: Iterable[AlignedSegment]
