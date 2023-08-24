@@ -64,9 +64,6 @@ except ImportError:
 import re
 import warnings
 import array
-import traceback
-import sys
-
 from libc.errno  cimport errno, EPIPE
 from libc.string cimport strcmp, strpbrk, strerror
 from libc.stdint cimport INT32_MAX
@@ -79,7 +76,6 @@ from pysam.libcutils cimport force_bytes, force_str, charptr_to_str
 from pysam.libcutils cimport encode_filename, from_string_and_size
 from pysam.libcalignedsegment cimport makeAlignedSegment, makePileupColumn
 from pysam.libchtslib cimport HTSFile, hisremote
-
 
 if PY_MAJOR_VERSION >= 3:
     from io import StringIO
@@ -1459,181 +1455,18 @@ cdef class AlignmentFile(HTSFile):
         return counter
 
     @cython.boundscheck(False)  # we do manual bounds checking
-    def count_coverage(self,
-                       contig,
-                       start=None,
-                       stop=None,
-                       region=None,
-                       quality_threshold=15,
-                       read_callback='all',
-                       reference=None,
-                       end=None,
-                       gc_corr=True):
-        """count the coverage of genomic positions by reads in :term:`region`.
-
-        The region is specified by :term:`contig`, `start` and `stop`.
-        :term:`reference` and `end` are also accepted for backward
-        compatibility as synonyms for :term:`contig` and `stop`,
-        respectively.  Alternatively, a `samtools`_ :term:`region`
-        string can be supplied.  The coverage is computed per-base [ACGT].
-
-        Parameters
-        ----------
-
-        contig : string
-            reference_name of the genomic region (chromosome)
-
-        start : int
-            start of the genomic region (0-based inclusive). If not
-            given, count from the start of the chromosome.
-
-        stop : int
-            end of the genomic region (0-based exclusive). If not given,
-            count to the end of the chromosome.
-
-        region : string
-            a region string.
-
-        quality_threshold : int
-            quality_threshold is the minimum quality score (in phred) a
-            base has to reach to be counted.
-
-        read_callback: string or function
-
-            select a call-back to ignore reads when counting. It can
-            be either a string with the following values:
-
-            ``all``
-                skip reads in which any of the following
-                flags are set: BAM_FUNMAP, BAM_FSECONDARY, BAM_FQCFAIL,
-                BAM_FDUP
-
-            ``nofilter``
-                uses every single read
-
-            Alternatively, `read_callback` can be a function
-            ``check_read(read)`` that should return True only for
-            those reads that shall be included in the counting.
-
-        reference : string
-            backward compatible synonym for `contig`
-
-        end : int
-            backward compatible synonym for `stop`
-        gc_corr: bool
-            perform GC correction with the 'YC' Tag
-
-
-        Raises
-        ------
-
-        ValueError
-            if the genomic coordinates are out of range or invalid.
-
-        Returns
-        -------
-
-        four array.arrays of the same length in order A C G T : tuple
-
-        """
-
-        cdef uint32_t contig_length = self.get_reference_length(contig)
-        cdef int _start = start if start is not None else 0
-        cdef int _stop = stop if stop is not None else contig_length
-        _stop = _stop if _stop < contig_length else contig_length
-
-        if _stop == _start:
-            raise ValueError("interval of size 0")
-        if _stop < _start:
-            raise ValueError("interval of size less than 0")
-
-        cdef int length = _stop - _start
-        cdef c_array.array int_array_template = array.array('f', [])
-        cdef c_array.array count_low
-        cdef c_array.array count_tot
-        cdef c_array.array count_cov
-
-        count_low = c_array.clone(int_array_template, length, zero=True)
-        count_tot = c_array.clone(int_array_template, length, zero=True)
-        count_cov = c_array.clone(int_array_template, length, zero=True)
-
-        cdef AlignedSegment read
-        cdef cython.str seq
-        cdef c_array.array quality
-        cdef int qpos
-        cdef float gc_tag
-        cdef int refpos
-        cdef int c = 0
-        cdef int filter_method = 0
-        cdef int t_len
-
-
-        if read_callback == "all":
-            filter_method = 1
-        elif read_callback == "nofilter":
-            filter_method = 2
-
-        cdef int _threshold = quality_threshold or 0
-        for read in self.fetch(contig=contig,
-                               reference=reference,
-                               start=start,
-                               stop=stop,
-                               end=end,
-                               region=region):
-            # apply filter
-            if read.is_forward:
-                if filter_method == 1:
-                    # filter = "all"
-                    if (read.flag & (0x4 | 0x100 | 0x200 | 0x400)):
-                        continue
-                elif filter_method == 2:
-                    # filter = "nofilter"
-                    pass
-                else:
-                    if not read_callback(read):
-                        continue
-
-                # count
-                seq = read.seq
-                #gc_tag = 1.0
-                if gc_corr:
-                    try:
-                        gc_tag = read.get_tag('YC')
-                    except Exception as e:
-                        gc_tag = 1.0
-                else:
-                    gc_tag = 1.0
-                if seq is None:
-                    continue
-                quality = read.query_qualities
-                t_len = read.template_length
-                #sys.stderr.write(str(read.flag))
-                #sys.stderr.write("\n")
-                for qpos, refpos in read.get_aligned_template(True):
-                    if qpos is not None and refpos is not None and \
-                            _start <= refpos < _stop:
-
-                        # only check base quality if _threshold > 0
-                        if (_threshold and quality and quality[qpos] >= _threshold) or not _threshold:
-                            count_cov.data.as_floats[refpos - _start] += gc_tag
-                            count_tot.data.as_floats[refpos - _start] += 1.0
-                            if t_len < 150:
-                                count_low.data.as_floats[refpos - _start] += 1.0
-        return count_cov, count_tot, count_low
-
-    @cython.boundscheck(False)  # we do manual bounds checking
     def count_fragments(self,
-                       contig,
-                       frag_low,
-                       frag_high,
-                       start=None,
-                       stop=None,
-                       region=None,
-                       quality_threshold=15,
-                       read_callback='all',
-                       reference=None,
-                       end=None,
-                       gc_corr=True):
+                        contig,
+                        frag_low,
+                        frag_high,
+                        start=None,
+                        stop=None,
+                        region=None,
+                        quality_threshold=15,
+                        read_callback='all',
+                        reference=None,
+                        end=None,
+                        gc_corr=True):
         """count the coverage of genomic positions by reads in :term:`region`.
 
         The region is specified by :term:`contig`, `start` and `stop`.
@@ -1782,11 +1615,360 @@ cdef class AlignmentFile(HTSFile):
 
                         # only check base quality if _threshold > 0
                         if (_threshold and quality and quality[qpos] >= _threshold) or not _threshold:
-                            if t_len > 151 and t_len < 220:
+                            if t_len > 0 and t_len < 250:
                                 count_tot.data.as_floats[refpos - _start] += 1.0
-                            if t_len > frag_low and t_len < frag_high:
+                            if t_len > 250 and t_len < 500:
                                 count_low.data.as_floats[refpos - _start] += 1.0
         return count_tot, count_low
+
+    @cython.boundscheck(False)  # we do manual bounds checking
+    def count_coverage_c60(self,
+                       contig,
+                       start=None,
+                       stop=None,
+                       region=None,
+                       quality_threshold=15,
+                       read_callback='all',
+                       reference=None,
+                       end=None,
+                       gc_corr=True):
+        """count the coverage of genomic positions by reads in :term:`region`.
+
+        The region is specified by :term:`contig`, `start` and `stop`.
+        :term:`reference` and `end` are also accepted for backward
+        compatibility as synonyms for :term:`contig` and `stop`,
+        respectively.  Alternatively, a `samtools`_ :term:`region`
+        string can be supplied.  The coverage is computed per-base [ACGT].
+
+        Parameters
+        ----------
+
+        contig : string
+            reference_name of the genomic region (chromosome)
+
+        start : int
+            start of the genomic region (0-based inclusive). If not
+            given, count from the start of the chromosome.
+
+        stop : int
+            end of the genomic region (0-based exclusive). If not given,
+            count to the end of the chromosome.
+
+        region : string
+            a region string.
+
+        quality_threshold : int
+            quality_threshold is the minimum quality score (in phred) a
+            base has to reach to be counted.
+
+        read_callback: string or function
+
+            select a call-back to ignore reads when counting. It can
+            be either a string with the following values:
+
+            ``all``
+                skip reads in which any of the following
+                flags are set: BAM_FUNMAP, BAM_FSECONDARY, BAM_FQCFAIL,
+                BAM_FDUP
+
+            ``nofilter``
+                uses every single read
+
+            Alternatively, `read_callback` can be a function
+            ``check_read(read)`` that should return True only for
+            those reads that shall be included in the counting.
+
+        reference : string
+            backward compatible synonym for `contig`
+
+        end : int
+            backward compatible synonym for `stop`
+        gc_corr: bool
+            perform GC correction with the 'YC' Tag
+
+        Raises
+        ------
+
+        ValueError
+            if the genomic coordinates are out of range or invalid.
+
+        Returns
+        -------
+
+        four array.arrays of the same length in order A C G T : tuple
+
+        """
+
+        cdef uint32_t contig_length = self.get_reference_length(contig)
+        cdef int _start = start if start is not None else 0
+        cdef int _stop = stop if stop is not None else contig_length
+        _stop = _stop if _stop < contig_length else contig_length
+
+        if _stop == _start:
+            raise ValueError("interval of size 0")
+        if _stop < _start:
+            raise ValueError("interval of size less than 0")
+
+        cdef int length = _stop - _start
+        cdef c_array.array int_array_template = array.array('f', [])
+        cdef c_array.array count_low
+        cdef c_array.array count_tot
+        cdef c_array.array count_cov
+
+        count_low = c_array.clone(int_array_template, length, zero=True)
+        count_tot = c_array.clone(int_array_template, length, zero=True)
+        count_cov = c_array.clone(int_array_template, length, zero=True)
+
+        cdef AlignedSegment read
+        cdef cython.str seq
+        cdef c_array.array quality
+        cdef int qpos
+        cdef float gc_tag
+        cdef int refpos
+        cdef int count_length
+        cdef int c = 0
+        cdef int filter_method = 0
+        cdef int t_len
+        cdef int t_start
+        cdef int t_end
+
+
+        if read_callback == "all":
+            filter_method = 1
+        elif read_callback == "nofilter":
+            filter_method = 2
+
+        cdef int _threshold = quality_threshold or 0
+        for read in self.fetch(contig=contig,
+                               reference=reference,
+                               start=start,
+                               stop=stop,
+                               end=end,
+                               region=region):
+            # apply filter
+            if read.is_forward:
+                if filter_method == 1:
+                    # filter = "all"
+                    if (read.flag & (0x4 | 0x100 | 0x200 | 0x400 | 0x800)):
+                        continue
+                    if read.template_length == 0:
+                        continue
+                    if read.template_length > 220 or read.template_length < 0:
+                        continue
+                elif filter_method == 2:
+                    # filter = "nofilter"
+                    pass
+                else:
+                    if not read_callback(read):
+                        continue
+
+                # count
+                seq = read.seq
+                #gc_tag = 1.0
+                if gc_corr:
+                    try:
+                        gc_tag = read.get_tag('GC')
+                    except Exception as e:
+                        gc_tag = 1.0
+                else:
+                    gc_tag = 1.0
+                if seq is None:
+                    continue
+                quality = read.query_qualities
+                t_len = read.template_length
+                count_length = 0
+
+                t_start = read.get_aligned_template(True)[0][1]
+                t_end = read.get_aligned_template(True)[-1][1]
+                for qpos, refpos in read.get_aligned_template(True):
+
+                    #print(qpos, refpos, t_len/2)
+                    if qpos is not None and refpos is not None and \
+                       _start <= refpos < _stop and t_start + t_len/2 - 30 <= refpos < t_end - t_len/2 + 30:
+                        count_length += 1
+                        #print(_start, t_len/2 - 30, _stop, t_len/2 + 30, " -> ", t_len, " -> ", refpos, qpos)
+
+                        # only check base quality if _threshold > 0
+                        if (_threshold and quality and quality[qpos] >= _threshold) or not _threshold:
+
+                                count_cov.data.as_floats[refpos - _start] += gc_tag
+                                count_tot.data.as_floats[refpos - _start] += 1.0
+                                if t_len < 150:
+                                    count_low.data.as_floats[refpos - _start] += 1.0
+        return count_cov, count_tot, count_low
+
+    @cython.boundscheck(False)  # we do manual bounds checking
+    def count_coverage(self,
+                       contig,
+                       start=None,
+                       stop=None,
+                       region=None,
+                       low_frag=None,
+                       high_frag=None,
+                       quality_threshold=15,
+                       read_callback='all',
+                       reference=None,
+                       end=None,
+                       gc_corr=True):
+        """count the coverage of genomic positions by reads in :term:`region`.
+
+        The region is specified by :term:`contig`, `start` and `stop`.
+        :term:`reference` and `end` are also accepted for backward
+        compatibility as synonyms for :term:`contig` and `stop`,
+        respectively.  Alternatively, a `samtools`_ :term:`region`
+        string can be supplied.  The coverage is computed per-base [ACGT].
+
+        Parameters
+        ----------
+
+        contig : string
+            reference_name of the genomic region (chromosome)
+
+        start : int
+            start of the genomic region (0-based inclusive). If not
+            given, count from the start of the chromosome.
+
+        stop : int
+            end of the genomic region (0-based exclusive). If not given,
+            count to the end of the chromosome.
+
+        region : string
+            a region string.
+
+        quality_threshold : int
+            quality_threshold is the minimum quality score (in phred) a
+            base has to reach to be counted.
+
+        read_callback: string or function
+
+            select a call-back to ignore reads when counting. It can
+            be either a string with the following values:
+
+            ``all``
+                skip reads in which any of the following
+                flags are set: BAM_FUNMAP, BAM_FSECONDARY, BAM_FQCFAIL,
+                BAM_FDUP
+
+            ``nofilter``
+                uses every single read
+
+            Alternatively, `read_callback` can be a function
+            ``check_read(read)`` that should return True only for
+            those reads that shall be included in the counting.
+
+        reference : string
+            backward compatible synonym for `contig`
+
+        end : int
+            backward compatible synonym for `stop`
+        gc_corr: bool
+            perform GC correction with the 'YC' Tag
+
+        Raises
+        ------
+
+        ValueError
+            if the genomic coordinates are out of range or invalid.
+
+        Returns
+        -------
+
+        four array.arrays of the same length in order A C G T : tuple
+
+        """
+
+        cdef uint32_t contig_length = self.get_reference_length(contig)
+        cdef int _start = start if start is not None else 0
+        cdef int _stop = stop if stop is not None else contig_length
+        _stop = _stop if _stop < contig_length else contig_length
+
+        if _stop == _start:
+            raise ValueError("interval of size 0")
+        if _stop < _start:
+            raise ValueError("interval of size less than 0")
+
+        cdef int length = _stop - _start
+        cdef c_array.array int_array_template = array.array('f', [])
+        cdef c_array.array count_low
+        cdef c_array.array count_tot
+        cdef c_array.array count_cov
+
+        count_low = c_array.clone(int_array_template, length, zero=True)
+        count_tot = c_array.clone(int_array_template, length, zero=True)
+        count_cov = c_array.clone(int_array_template, length, zero=True)
+
+        cdef AlignedSegment read
+        cdef cython.str seq
+        cdef c_array.array quality
+        cdef int qpos
+        cdef float gc_tag
+        cdef int refpos
+        cdef int count_length
+        cdef int c = 0
+        cdef int filter_method = 0
+        cdef int t_len
+        cdef int t_start
+        cdef int t_end
+
+
+        if read_callback == "all":
+            filter_method = 1
+        elif read_callback == "nofilter":
+            filter_method = 2
+
+        cdef int _threshold = quality_threshold or 0
+        for read in self.fetch(contig=contig,
+                               reference=reference,
+                               start=start,
+                               stop=stop,
+                               end=end,
+                               region=region):
+            # apply filter
+            if 0 <= read.template_length <= 500 and read.is_paired and not read.is_unmapped and not read.mate_is_unmapped and read.is_forward != read.mate_is_forward and not read.is_secondary and not read.is_qcfail and not read.is_supplementary and not read.is_duplicate and read.reference_length >= read.query_length * 0.75:
+                if filter_method == 1:
+                    # filter = "all"
+                    if read.template_length == 0:
+                        continue
+                    if read.template_length > high_frag or read.template_length < low_frag:
+                        continue
+                elif filter_method == 2:
+                    # filter = "nofilter"
+                    pass
+                else:
+                    if not read_callback(read):
+                        continue
+
+                # count
+                seq = read.seq
+                #gc_tag = 1.0
+                if gc_corr:
+                    try:
+                        gc_tag = read.get_tag('GC')
+                    except Exception as e:
+                        gc_tag = 1.0
+                else:
+                    gc_tag = 1.0
+                if seq is None:
+                    continue
+                quality = read.query_qualities
+                t_len = read.template_length
+                count_length = 0
+
+                t_start = read.get_aligned_template(True)[0][1]
+                t_end = read.get_aligned_template(True)[-1][1]
+                for qpos, refpos in read.get_aligned_template(True):
+
+                    #print(qpos, refpos, t_len/2)
+                    if qpos is not None and refpos is not None and \
+                       _start <= refpos < _stop:
+                        # only check base quality if _threshold > 0
+                        if (_threshold and quality and quality[qpos] >= _threshold) or not _threshold:
+
+                                count_cov.data.as_floats[refpos - _start] += gc_tag
+                                count_tot.data.as_floats[refpos - _start] += 1.0
+                                if t_len < 150:
+                                    count_low.data.as_floats[refpos - _start] += 1.0
+        return count_cov, count_tot, count_low
 
     def find_introns_slow(self, read_iterator):
         """Return a dictionary {(start, stop): count}

@@ -144,7 +144,7 @@ class AlignmentFile(HTSFile):
         reference: Optional[str] = ...,
         end: Optional[int] = ...,
     ) -> int: ...
-    def count_coverage(
+    def count_coverage_c60(
         self,
         contig: Optional[str] = ...,
         start: Optional[int] = ...,
@@ -156,19 +156,33 @@ class AlignmentFile(HTSFile):
         end: Optional[int] = ...,
         gc_corr: Optional[bool] = ...,
     ) -> Tuple[array.array, array.array, array.array, array.array]: ...
-    def count_fragments(
+    def count_coverage(
         self,
         contig: Optional[str] = ...,
-        frag_low: Optional[int] = ...,
-        frag_high: Optional[int] = ...,
         start: Optional[int] = ...,
         stop: Optional[int] = ...,
         region: Optional[str] = ...,
+        low_frag: Optional[int] = ...,
+        high_frag: Optional[int] = ...,
         quality_threshold: int = ...,
         read_callback: Union[str, Callable[[AlignedSegment], bool]] = ...,
         reference: Optional[str] = ...,
         end: Optional[int] = ...,
         gc_corr: Optional[bool] = ...,
+    ) -> Tuple[array.array, array.array, array.array, array.array]: ...
+    def count_fragments(
+            self,
+            contig: Optional[str] = ...,
+            frag_low: Optional[int] = ...,
+            frag_high: Optional[int] = ...,
+            start: Optional[int] = ...,
+            stop: Optional[int] = ...,
+            region: Optional[str] = ...,
+            quality_threshold: int = ...,
+            read_callback: Union[str, Callable[[AlignedSegment], bool]] = ...,
+            reference: Optional[str] = ...,
+            end: Optional[int] = ...,
+            gc_corr: Optional[bool] = ...,
     ) -> Tuple[array.array, array.array, array.array, array.array]: ...
     def find_introns_slow(
         self, read_iterator: Iterable[AlignedSegment]
